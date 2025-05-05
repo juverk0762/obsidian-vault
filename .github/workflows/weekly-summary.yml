@@ -22,7 +22,8 @@ jobs:
       - name: Collect changed notes
         id: diff
         run: |
-          FILES=$(git diff --name-only HEAD^ | grep '\.md$' | tr '\n' ' ')
+          FILES=$(git diff --name-only --since="7 days ago" -- '*.md' | tr '\n' ' ')
+          echo "Changed files: $FILES"      # デバッグ表示
           echo "files=$FILES" >> "$GITHUB_OUTPUT"
 
       - name: Summarize with GPT
