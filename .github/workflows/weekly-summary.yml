@@ -1,0 +1,63 @@
+name: Weekly Obsidian Summary
+on:
+  schedule:
+    - cron: '0 0 * * 6'     # 土曜09:00JST
+  workflow_dispatch:
+
+jobs:
+  summarize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: pip install openai markdown
+
+      - name: Collect changed notes
+        id: diff
+        run: |
+          FILES=$(git diff --name-only HEAD^ | grep '\.md$' | tr '\n' ' ')
+          echo "files=$FILES" >> "$GITHUB_OUTPUT"
+
+      - name: Summarize with GPT
+        if: steps.diff.outputs.files != ''
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          FILES: ${{ steps.diff.outputs.files }}
+        run: |
+          python <<'PY'
+          import os, openai, textwrap, subprocess
+          files = os.getenv("FILES").split()
+          chunks=[]
+          for f in files:
+              body=subprocess.check_output(["head","-c","4000",f]).decode('utf-8','ignore')
+              chunks.append(f"## {f}\n```\n{body}\n```")
+          prompt=textwrap.dedent(f"""
+          以下は今週変更された Obsidian ノートの抜粋です。
+          各ノートのポイントを3行以内で日本語で要約してください。
+          {''.join(chunks)}
+          """)
+          openai.api_key=os.getenv("OPENAI_API_KEY")
+          res=openai.ChatCompletion.create(
+              model="gpt-4o-mini",
+              messages=[{"role":"user","content":prompt}],
+              temperature=0.3)
+          summary=res.choices[0].message.content
+          with open("weekly_summary.md","w") as f:
+              f.write(summary)
+          PY
+
+      - name: Commit summary
+        if: steps.diff.outputs.files != ''
+        run: |
+          git config --local user.email "action@github"
+          git config --local user.name  "Summary Bot"
+          git add weekly_summary.md
+          git commit -m "chore: weekly summary"
+          git push
